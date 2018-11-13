@@ -263,11 +263,6 @@ impl<'input> Iterator for Lexer<'input> {
             break;
         }
 
-        self.eat_whitespace();
-        if self.chars.peek().is_none() {
-            return None;
-        }
-
         let (i, ch) = self.chars.peek().cloned().unwrap();
 
         if ch == '"' {
