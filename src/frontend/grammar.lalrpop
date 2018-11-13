@@ -1,0 +1,177 @@
+use crate::ast;
+use crate::frontend::lexer;
+use failure;
+
+grammar<'input>(ctx: &mut ast::Context);
+
+pub Program: () = Class+ => ();
+
+SepList<T, S>: Vec<T> = <v:(<T> S)*> <e:T?> => match e {
+    None => v,
+    Some(e) => {
+        let mut v = v;
+        v.push(e);
+        v
+    }
+};
+
+Type: ast::TypeIdentifier = <t:TypeToken> =>
+    ctx.new_type_identifier(t);
+
+Identifier: ast::Identifier = <i:IdentifierToken> =>
+    ctx.new_identifier(i);
+
+Class: ast::NodeId =
+    "class" <t:Type> <parent:("inherits" <Type>)?> "{" <features:SepList<Feature, ";">> "}" => {
+        ctx.new_class(t, parent, features)
+    };
+
+Feature: ast::NodeId = {
+    <name:Identifier> "(" <formals:SepList<Formal, ",">> ")" ":" <t:Type> "{" <e:Expr> "}" =>
+        ctx.new_method(name, formals, t, e),
+    <name:Identifier> ":" <t:Type> <e:("<-" <Expr>)?> =>
+        ctx.new_property(name, t, e),
+};
+
+Formal: (ast::Identifier, ast::TypeIdentifier) = <i:Identifier> ":" <t:Type> => (i, t);
+
+Expr: ast::NodeId = {
+    <NotExpr>,
+    <i:Identifier> "<-" <e:Expr> => ctx.new_assign(i, e),
+};
+
+NotExpr: ast::NodeId = {
+    <RelExpr>,
+    "not" <e:RelExpr> => ctx.new_not(e),
+};
+
+RelExpr: ast::NodeId = {
+    <ArithExpr>,
+    <lhs:RelExpr> "<=" <rhs:ArithExpr> => ctx.new_less_than_equal(lhs, rhs),
+    <lhs:RelExpr> "<" <rhs:ArithExpr> => ctx.new_less_than(lhs, rhs),
+    <lhs:RelExpr> "=" <rhs:ArithExpr> => ctx.new_equal(lhs, rhs),
+};
+
+ArithExpr: ast::NodeId = {
+    <ProdExpr>,
+    <lhs:ArithExpr> "+" <rhs:ProdExpr> => ctx.new_add(lhs, rhs),
+    <lhs:ArithExpr> "-" <rhs:ProdExpr> => ctx.new_sub(lhs, rhs),
+};
+
+ProdExpr: ast::NodeId = {
+    <IsVoidExpr>,
+    <lhs:ProdExpr> "*" <rhs:IsVoidExpr> => ctx.new_mul(lhs, rhs),
+    <lhs:ProdExpr> "/" <rhs:IsVoidExpr> => ctx.new_div(lhs, rhs),
+};
+
+IsVoidExpr: ast::NodeId = {
+    <NegExpr>,
+    "isvoid" <e:NegExpr> => ctx.new_isvoid(e),
+};
+
+NegExpr: ast::NodeId = {
+    <DotExpr>,
+    "~" <e:DotExpr> => ctx.new_negate(e),
+};
+
+DotExpr: ast::NodeId = {
+    <LetExpr>,
+    <e:DotExpr> <c:("@" <Type>)?> "." <id:Identifier> "(" <args:SepList<Expr, ",">> ")" =>
+        ctx.new_dispatch(e, c, id, args),
+};
+
+LetExpr: ast::NodeId = {
+    <SimpleExpr>,
+    "let" <id:Identifier> ":" <ty:Type> <e:("<-" <Expr>)?>
+        <bindings:("," <Identifier> ":" <Type> <("<-" <Expr>)?> )*>
+        "in" <body:SimpleExpr> => {
+            let mut bindings = bindings;
+            bindings.insert(0, (id, ty, e));
+            ctx.new_let_in(bindings, body)
+        }
+};
+
+SimpleExpr: ast::NodeId = {
+    <id:Identifier> "(" <args:SepList<Expr, ",">> ")" => {
+        let receiver = ctx.new_identifier("self");
+        let receiver = ctx.new_variable_reference(receiver);
+        let cast = None;
+        ctx.new_dispatch(receiver, cast, id, args)
+    },
+    "if" <condition:Expr> "then" <consequent:Expr> "else" <alternative:Expr> "fi" =>
+        ctx.new_if_then_else(condition, consequent, alternative),
+    "while" <condition:Expr> "loop" <body:Expr> "pool" =>
+        ctx.new_while(condition, body),
+    "{" <es:(<Expr> ";")+> "}" =>
+        ctx.new_block(es),
+    "case" <e:Expr> "of" <cases:(<Identifier> ":" <Type> "=>" <Expr>)+> "esac" =>
+        ctx.new_case(e, cases),
+    "new" <t:Type> =>
+        ctx.new_new(t),
+    "(" <e:Expr> ")" =>
+        e,
+    <id:Identifier> =>
+        ctx.new_variable_reference(id),
+    <i:IntegerToken> =>
+        ctx.new_integer_const(i),
+    <s:StringToken> =>
+        ctx.new_string_const(s),
+    "true" =>
+        ctx.new_bool_const(true),
+    "false" =>
+        ctx.new_bool_const(false),
+};
+
+extern {
+    type Location = usize;
+    type Error = failure::Error;
+
+    enum lexer::Token<'input> {
+        IntegerToken => lexer::Token::Integer(<i64>),
+        IdentifierToken => lexer::Token::Identifier(<&'input str>),
+        TypeToken => lexer::Token::Type(<&'input str>),
+        StringToken => lexer::Token::String(<String>),
+
+        // Keywords
+        "class" => lexer::Token::Class,
+        "else" => lexer::Token::Else,
+        "false" => lexer::Token::False,
+        "fi" => lexer::Token::Fi,
+        "if" => lexer::Token::If,
+        "in" => lexer::Token::In,
+        "inherits" => lexer::Token::Inherits,
+        "isvoid" => lexer::Token::Isvoid,
+        "let" => lexer::Token::Let,
+        "loop" => lexer::Token::Loop,
+        "pool" => lexer::Token::Pool,
+        "then" => lexer::Token::Then,
+        "while" => lexer::Token::While,
+        "case" => lexer::Token::Case,
+        "esac" => lexer::Token::Esac,
+        "new" => lexer::Token::New,
+        "of" => lexer::Token::Of,
+        "not" => lexer::Token::Not,
+        "true" => lexer::Token::True,
+
+        // Symbols
+        "{" => lexer::Token::LeftCurly,
+        "}" => lexer::Token::RightCurly,
+        "(" => lexer::Token::LeftParen,
+        ")" => lexer::Token::RightParen,
+        ";" => lexer::Token::Semicolon,
+        ":" => lexer::Token::Colon,
+        "." => lexer::Token::Dot,
+        "," => lexer::Token::Comma,
+        "<-" => lexer::Token::Assign,
+        "@" => lexer::Token::At,
+        "+" => lexer::Token::Add,
+        "-" => lexer::Token::Sub,
+        "*" => lexer::Token::Mul,
+        "/" => lexer::Token::Div,
+        "~" => lexer::Token::Negate,
+        "<" => lexer::Token::LessThan,
+        "<=" => lexer::Token::LessThanEqual,
+        "=" => lexer::Token::Equal,
+        "=>" => lexer::Token::RightArrow,
+    }
+}
