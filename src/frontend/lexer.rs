@@ -1,5 +1,6 @@
 use failure::{self, bail, format_err};
 use regex::Regex;
+use std::fmt;
 use std::iter::Peekable;
 use std::str::{CharIndices, FromStr};
 
@@ -53,6 +54,55 @@ pub enum Token<'input> {
     LessThanEqual,
     Equal,
     RightArrow,
+}
+
+impl<'input> fmt::Display for Token<'input> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Token::Integer(i) => write!(f, "{}", i),
+            Token::Identifier(s) |
+            Token::Type(s) => write!(f, "{}", s),
+            Token::String(s) => write!(f, "\"{}\"", s),
+            Token::Class => write!(f, "class"),
+            Token::Else => write!(f, "else"),
+            Token::False => write!(f, "false"),
+            Token::Fi => write!(f, "fi"),
+            Token::If => write!(f, "if"),
+            Token::In => write!(f, "in"),
+            Token::Inherits => write!(f, "inherits"),
+            Token::Isvoid => write!(f, "isvoid"),
+            Token::Let => write!(f, "let"),
+            Token::Loop => write!(f, "loop"),
+            Token::Pool => write!(f, "pool"),
+            Token::Then => write!(f, "then"),
+            Token::While => write!(f, "while"),
+            Token::Case => write!(f, "case"),
+            Token::Esac => write!(f, "esac"),
+            Token::New => write!(f, "new"),
+            Token::Of => write!(f, "of"),
+            Token::Not => write!(f, "not"),
+            Token::True => write!(f, "true"),
+            Token::LeftCurly => write!(f, "{{"),
+            Token::RightCurly => write!(f, "}}"),
+            Token::LeftParen => write!(f, "("),
+            Token::RightParen => write!(f, ")"),
+            Token::Semicolon => write!(f, ";"),
+            Token::Colon => write!(f, ":"),
+            Token::Dot => write!(f, "."),
+            Token::Comma => write!(f, ","),
+            Token::Assign => write!(f, "<-"),
+            Token::At => write!(f, "@"),
+            Token::Add => write!(f, "+"),
+            Token::Sub => write!(f, "-"),
+            Token::Mul => write!(f, "*"),
+            Token::Div => write!(f, "/"),
+            Token::Negate => write!(f, "~"),
+            Token::LessThan => write!(f, "<"),
+            Token::LessThanEqual => write!(f, "<="),
+            Token::Equal => write!(f, "="),
+            Token::RightArrow => write!(f, "=>"),
+        }
+    }
 }
 
 pub struct Lexer<'input> {

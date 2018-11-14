@@ -12,7 +12,10 @@ pub struct Context {
 pub type StringId = Id<String>;
 pub type NodeId = Id<Node>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TypeIdentifier(pub StringId);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Identifier(pub StringId);
 
 pub enum Node {
@@ -80,7 +83,9 @@ pub enum Node {
         args: Vec<NodeId>,
     },
     LetIn {
-        bindings: Vec<(Identifier, TypeIdentifier, Option<NodeId>)>,
+        id: Identifier,
+        ty: TypeIdentifier,
+        expr: Option<NodeId>,
         body: NodeId,
     },
     IfThenElse {
@@ -240,10 +245,12 @@ impl Context {
 
     pub fn new_let_in(
         &mut self,
-        bindings: Vec<(Identifier, TypeIdentifier, Option<NodeId>)>,
+        id: Identifier,
+        ty: TypeIdentifier,
+        expr: Option<NodeId>,
         body: NodeId,
     ) -> NodeId {
-        self.nodes.alloc(Node::LetIn { bindings, body })
+        self.nodes.alloc(Node::LetIn { id, ty, expr, body })
     }
 
     pub fn new_if_then_else(

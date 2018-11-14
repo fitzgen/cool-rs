@@ -9,6 +9,11 @@ fn main() {
 }
 
 fn build_tests() {
+    build_lexer_tests();
+    build_parser_tests();
+}
+
+fn build_lexer_tests() {
     let mut lexer_tests = String::new();
     println!("cargo:rerun-if-changed=tests/lexer.rs");
     println!("cargo:rerun-if-changed=tests/lexer/");
@@ -40,6 +45,44 @@ fn build_tests() {
     fs::write(
         Path::new(&env::var("OUT_DIR").unwrap()).join("lexer_tests.rs"),
         lexer_tests.as_bytes(),
+    )
+    .unwrap();
+}
+
+fn build_parser_tests() {
+    let mut parser_tests = String::new();
+    println!("cargo:rerun-if-changed=tests/parser.rs");
+    println!("cargo:rerun-if-changed=tests/parser/");
+    for entry in glob::glob("tests/parser/*.test").unwrap() {
+        let path = entry.unwrap();
+        println!("cargo:rerun-if-changed={}", path.display());
+
+        let name: String = path
+            .display()
+            .to_string()
+            .chars()
+            .map(|c| match c {
+                'a'...'z' | 'A'...'Z' | '0'...'9' => c,
+                '+' => 'p',
+                '-' => 'm',
+                _ => '_',
+            })
+            .collect();
+
+        parser_tests.push_str(&format!(
+            r#"
+                #[test]
+                fn {name}() {{
+                    assert_parser(Path::new("{path}"), Path::new("{path}.out"));
+                }}
+            "#,
+            name = name,
+            path = path.display(),
+        ));
+    }
+    fs::write(
+        Path::new(&env::var("OUT_DIR").unwrap()).join("parser_tests.rs"),
+        parser_tests.as_bytes(),
     )
     .unwrap();
 }

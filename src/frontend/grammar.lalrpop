@@ -4,13 +4,13 @@ use failure;
 
 grammar<'input>(ctx: &mut ast::Context);
 
-pub Program: () = Class+ => ();
+pub Program: Vec<ast::NodeId> = <Class+>;
 
-SepList<T, S>: Vec<T> = <v:(<T> S)*> <e:T?> => match e {
-    None => v,
-    Some(e) => {
+SepList<T, S>: Vec<T> = {
+    => vec![],
+    <e:T> <v:(S <T>)*> => {
         let mut v = v;
-        v.push(e);
+        v.insert(0, e);
         v
     }
 };
@@ -22,93 +22,83 @@ Identifier: ast::Identifier = <i:IdentifierToken> =>
     ctx.new_identifier(i);
 
 Class: ast::NodeId =
-    "class" <t:Type> <parent:("inherits" <Type>)?> "{" <features:SepList<Feature, ";">> "}" => {
+    "class" <t:Type> <parent:("inherits" <Type>)?> "{" <features:(<Feature> ";")*> "}" ";" => {
         ctx.new_class(t, parent, features)
     };
 
 Feature: ast::NodeId = {
-    <name:Identifier> "(" <formals:SepList<Formal, ",">> ")" ":" <t:Type> "{" <e:Expr> "}" =>
+    <name:Identifier> "(" <formals:SepList<Formal, ",">> ")" ":" <t:Type> "{" <e:Expr<"yes">> "}" =>
         ctx.new_method(name, formals, t, e),
-    <name:Identifier> ":" <t:Type> <e:("<-" <Expr>)?> =>
+    <name:Identifier> ":" <t:Type> <e:("<-" <Expr<"yes">>)?> =>
         ctx.new_property(name, t, e),
 };
 
 Formal: (ast::Identifier, ast::TypeIdentifier) = <i:Identifier> ":" <t:Type> => (i, t);
 
-Expr: ast::NodeId = {
-    <NotExpr>,
-    <i:Identifier> "<-" <e:Expr> => ctx.new_assign(i, e),
+Expr<AllowLet>: ast::NodeId = {
+    <NotExpr<AllowLet>>,
+    <i:Identifier> "<-" <e:Expr<AllowLet>> => ctx.new_assign(i, e),
 };
 
-NotExpr: ast::NodeId = {
-    <RelExpr>,
-    "not" <e:RelExpr> => ctx.new_not(e),
+NotExpr<AllowLet>: ast::NodeId = {
+    <RelExpr<AllowLet>>,
+    "not" <e:RelExpr<AllowLet>> => ctx.new_not(e),
 };
 
-RelExpr: ast::NodeId = {
-    <ArithExpr>,
-    <lhs:RelExpr> "<=" <rhs:ArithExpr> => ctx.new_less_than_equal(lhs, rhs),
-    <lhs:RelExpr> "<" <rhs:ArithExpr> => ctx.new_less_than(lhs, rhs),
-    <lhs:RelExpr> "=" <rhs:ArithExpr> => ctx.new_equal(lhs, rhs),
+RelExpr<AllowLet>: ast::NodeId = {
+    <ArithExpr<AllowLet>>,
+    <lhs:ArithExpr<"no">> "<=" <rhs:ArithExpr<AllowLet>> => ctx.new_less_than_equal(lhs, rhs),
+    <lhs:ArithExpr<"no">> "<" <rhs:ArithExpr<AllowLet>> => ctx.new_less_than(lhs, rhs),
+    <lhs:ArithExpr<"no">> "=" <rhs:ArithExpr<AllowLet>> => ctx.new_equal(lhs, rhs),
 };
 
-ArithExpr: ast::NodeId = {
-    <ProdExpr>,
-    <lhs:ArithExpr> "+" <rhs:ProdExpr> => ctx.new_add(lhs, rhs),
-    <lhs:ArithExpr> "-" <rhs:ProdExpr> => ctx.new_sub(lhs, rhs),
+ArithExpr<AllowLet>: ast::NodeId = {
+    <ProdExpr<AllowLet>>,
+    <lhs:ArithExpr<"no">> "+" <rhs:ProdExpr<AllowLet>> => ctx.new_add(lhs, rhs),
+    <lhs:ArithExpr<"no">> "-" <rhs:ProdExpr<AllowLet>> => ctx.new_sub(lhs, rhs),
 };
 
-ProdExpr: ast::NodeId = {
-    <IsVoidExpr>,
-    <lhs:ProdExpr> "*" <rhs:IsVoidExpr> => ctx.new_mul(lhs, rhs),
-    <lhs:ProdExpr> "/" <rhs:IsVoidExpr> => ctx.new_div(lhs, rhs),
+ProdExpr<AllowLet>: ast::NodeId = {
+    <IsVoidExpr<AllowLet>>,
+    <lhs:ProdExpr<"no">> "*" <rhs:IsVoidExpr<AllowLet>> => ctx.new_mul(lhs, rhs),
+    <lhs:ProdExpr<"no">> "/" <rhs:IsVoidExpr<AllowLet>> => ctx.new_div(lhs, rhs),
 };
 
-IsVoidExpr: ast::NodeId = {
-    <NegExpr>,
-    "isvoid" <e:NegExpr> => ctx.new_isvoid(e),
+IsVoidExpr<AllowLet>: ast::NodeId = {
+    <NegExpr<AllowLet>>,
+    "isvoid" <e:NegExpr<AllowLet>> => ctx.new_isvoid(e),
 };
 
-NegExpr: ast::NodeId = {
-    <DotExpr>,
-    "~" <e:DotExpr> => ctx.new_negate(e),
+NegExpr<AllowLet>: ast::NodeId = {
+    <DotExpr<AllowLet>>,
+    "~" <e:DotExpr<AllowLet>> => ctx.new_negate(e),
 };
 
-DotExpr: ast::NodeId = {
-    <LetExpr>,
-    <e:DotExpr> <c:("@" <Type>)?> "." <id:Identifier> "(" <args:SepList<Expr, ",">> ")" =>
+DotExpr<AllowLet>: ast::NodeId = {
+    <SimpleExpr<AllowLet>>,
+    <e:DotExpr<"no">> <c:("@" <Type>)?> "." <id:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" =>
         ctx.new_dispatch(e, c, id, args),
 };
 
-LetExpr: ast::NodeId = {
-    <SimpleExpr>,
-    "let" <id:Identifier> ":" <ty:Type> <e:("<-" <Expr>)?>
-        <bindings:("," <Identifier> ":" <Type> <("<-" <Expr>)?> )*>
-        "in" <body:SimpleExpr> => {
-            let mut bindings = bindings;
-            bindings.insert(0, (id, ty, e));
-            ctx.new_let_in(bindings, body)
-        }
-};
-
-SimpleExpr: ast::NodeId = {
-    <id:Identifier> "(" <args:SepList<Expr, ",">> ")" => {
+SimpleExpr<AllowLet>: ast::NodeId = {
+    <e:LetExpr> if AllowLet == "yes" => e,
+    <id:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" => {
         let receiver = ctx.new_identifier("self");
         let receiver = ctx.new_variable_reference(receiver);
         let cast = None;
         ctx.new_dispatch(receiver, cast, id, args)
     },
-    "if" <condition:Expr> "then" <consequent:Expr> "else" <alternative:Expr> "fi" =>
+    "if" <condition:Expr<"yes">> "then" <consequent:Expr<"yes">> "else" <alternative:Expr<"yes">> "fi" =>
         ctx.new_if_then_else(condition, consequent, alternative),
-    "while" <condition:Expr> "loop" <body:Expr> "pool" =>
+    "while" <condition:Expr<"yes">> "loop" <body:Expr<"yes">> "pool" =>
         ctx.new_while(condition, body),
-    "{" <es:(<Expr> ";")+> "}" =>
+    "{" <es:(<Expr<"yes">> ";")+> "}" =>
         ctx.new_block(es),
-    "case" <e:Expr> "of" <cases:(<Identifier> ":" <Type> "=>" <Expr>)+> "esac" =>
+    "case" <e:Expr<"yes">> "of" <cases:(<Identifier> ":" <Type> "=>" <Expr<"yes">> ";")+> "esac" =>
         ctx.new_case(e, cases),
     "new" <t:Type> =>
         ctx.new_new(t),
-    "(" <e:Expr> ")" =>
+    "(" <e:Expr<"yes">> ")" =>
         e,
     <id:Identifier> =>
         ctx.new_variable_reference(id),
@@ -120,6 +110,17 @@ SimpleExpr: ast::NodeId = {
         ctx.new_bool_const(true),
     "false" =>
         ctx.new_bool_const(false),
+};
+
+LetExpr: ast::NodeId = {
+    "let" <id:Identifier> ":" <ty:Type> <e:("<-" <Expr<"yes">>)?>
+        <bindings:("," <Identifier> ":" <Type> <("<-" <Expr<"yes">>)?> )*>
+        "in" <body:Expr<"yes">> => {
+            let body = bindings.into_iter().rev().fold(body, |body, (id, ty, expr)| {
+                ctx.new_let_in(id, ty, expr, body)
+            });
+            ctx.new_let_in(id, ty, e, body)
+        }
 };
 
 extern {
