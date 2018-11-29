@@ -11,6 +11,7 @@ fn main() {
 fn build_tests() {
     build_lexer_tests();
     build_parser_tests();
+    build_typing_tests();
 }
 
 fn build_lexer_tests() {
@@ -83,6 +84,42 @@ fn build_parser_tests() {
     fs::write(
         Path::new(&env::var("OUT_DIR").unwrap()).join("parser_tests.rs"),
         parser_tests.as_bytes(),
+    )
+    .unwrap();
+}
+
+fn build_typing_tests() {
+    let mut typing_tests = String::new();
+    println!("cargo:rerun-if-changed=tests/typing.rs");
+    println!("cargo:rerun-if-changed=tests/typing/");
+    for entry in glob::glob("tests/typing/*.test").unwrap() {
+        let path = entry.unwrap();
+        println!("cargo:rerun-if-changed={}", path.display());
+
+        let name: String = path
+            .display()
+            .to_string()
+            .chars()
+            .map(|c| match c {
+                'a'...'z' | 'A'...'Z' | '0'...'9' => c,
+                _ => '_',
+            })
+            .collect();
+
+        typing_tests.push_str(&format!(
+            r#"
+                #[test]
+                fn {name}() {{
+                    assert_typing(Path::new("{path}"), Path::new("{path}.out"));
+                }}
+            "#,
+            name = name,
+            path = path.display(),
+        ));
+    }
+    fs::write(
+        Path::new(&env::var("OUT_DIR").unwrap()).join("typing_tests.rs"),
+        typing_tests.as_bytes(),
     )
     .unwrap();
 }
