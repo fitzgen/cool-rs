@@ -60,8 +60,7 @@ impl<'input> fmt::Display for Token<'input> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Token::Integer(i) => write!(f, "{}", i),
-            Token::Identifier(s) |
-            Token::Type(s) => write!(f, "{}", s),
+            Token::Identifier(s) | Token::Type(s) => write!(f, "{}", s),
             Token::String(s) => write!(f, "\"{}\"", s),
             Token::Class => write!(f, "class"),
             Token::Else => write!(f, "else"),

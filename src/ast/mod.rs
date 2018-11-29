@@ -1,3 +1,6 @@
+mod dump;
+pub use self::dump::DumpAst;
+
 use id_arena::{Arena, Id};
 use std::collections::HashMap;
 
@@ -133,6 +136,10 @@ impl Context {
 
     pub fn node_ref(&self, id: NodeId) -> &Node {
         &self.nodes[id]
+    }
+
+    pub fn nodes(&self) -> &Arena<Node> {
+        &self.nodes
     }
 }
 

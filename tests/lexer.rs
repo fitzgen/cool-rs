@@ -69,7 +69,8 @@ fn read_token(line: &str) -> Result<lexer::Token, ()> {
                 let n = u8::from_str_radix(&caps[0][1..], 8).unwrap();
                 (n as char).to_string()
             });
-            let s = if let Some(Ok((_, lexer::Token::String(s), _))) = lexer::Lexer::new(&s).next() {
+            let s = if let Some(Ok((_, lexer::Token::String(s), _))) = lexer::Lexer::new(&s).next()
+            {
                 s
             } else {
                 panic!()

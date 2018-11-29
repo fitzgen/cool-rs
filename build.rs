@@ -108,6 +108,7 @@ fn build_typing_tests() {
 
         typing_tests.push_str(&format!(
             r#"
+                #[allow(non_snake_case)]
                 #[test]
                 fn {name}() {{
                     assert_typing(Path::new("{path}"), Path::new("{path}.out"));
