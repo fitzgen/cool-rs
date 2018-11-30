@@ -1,3 +1,6 @@
+mod inheritance_graph;
+pub use self::inheritance_graph::InheritanceGraph;
+
 mod dump;
 pub use self::dump::DumpAst;
 
