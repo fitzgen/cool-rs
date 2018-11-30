@@ -1,6 +1,7 @@
 mod dump;
 pub use self::dump::DumpAst;
 
+use crate::ty;
 use id_arena::{Arena, Id};
 use std::collections::HashMap;
 
@@ -10,6 +11,7 @@ pub struct Context {
     already_interned: HashMap<String, StringId>,
 
     nodes: Arena<Node>,
+    env: ty::Environment,
 }
 
 pub type StringId = Id<String>;
@@ -134,27 +136,18 @@ impl Context {
         &self.idents[id]
     }
 
+    pub fn new_node(&mut self, node: Node) -> NodeId {
+        let id = self.nodes.alloc(node);
+        self.env.alloc(id);
+        id
+    }
+
     pub fn node_ref(&self, id: NodeId) -> &Node {
         &self.nodes[id]
     }
 
     pub fn nodes(&self) -> &Arena<Node> {
         &self.nodes
-    }
-}
-
-impl Context {
-    pub fn new_class(
-        &mut self,
-        name: TypeIdentifier,
-        parent: Option<TypeIdentifier>,
-        features: Vec<NodeId>,
-    ) -> NodeId {
-        self.nodes.alloc(Node::Class {
-            name,
-            parent,
-            features,
-        })
     }
 
     pub fn new_type_identifier(&mut self, id: &str) -> TypeIdentifier {
@@ -167,146 +160,16 @@ impl Context {
         Identifier(id)
     }
 
-    pub fn new_method(
-        &mut self,
-        name: Identifier,
-        formals: Vec<(Identifier, TypeIdentifier)>,
-        ty: TypeIdentifier,
-        expr: NodeId,
-    ) -> NodeId {
-        self.nodes.alloc(Node::Method {
-            name,
-            formals,
-            ty,
-            expr,
-        })
-    }
-
-    pub fn new_property(
-        &mut self,
-        name: Identifier,
-        ty: TypeIdentifier,
-        expr: Option<NodeId>,
-    ) -> NodeId {
-        self.nodes.alloc(Node::Property { name, ty, expr })
-    }
-
-    pub fn new_assign(&mut self, id: Identifier, expr: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Assign { id, expr })
-    }
-
-    pub fn new_not(&mut self, expr: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Not { expr })
-    }
-
-    pub fn new_less_than_equal(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::LessThanEqual { lhs, rhs })
-    }
-
-    pub fn new_less_than(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::LessThan { lhs, rhs })
-    }
-
-    pub fn new_equal(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Equal { lhs, rhs })
-    }
-
-    pub fn new_add(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Add { lhs, rhs })
-    }
-
-    pub fn new_sub(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Sub { lhs, rhs })
-    }
-
-    pub fn new_mul(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Mul { lhs, rhs })
-    }
-
-    pub fn new_div(&mut self, lhs: NodeId, rhs: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Div { lhs, rhs })
-    }
-
-    pub fn new_isvoid(&mut self, expr: NodeId) -> NodeId {
-        self.nodes.alloc(Node::IsVoid { expr })
-    }
-
-    pub fn new_negate(&mut self, expr: NodeId) -> NodeId {
-        self.nodes.alloc(Node::Negate { expr })
-    }
-
-    pub fn new_dispatch(
-        &mut self,
-        receiver: NodeId,
-        cast: Option<TypeIdentifier>,
-        method: Identifier,
-        args: Vec<NodeId>,
-    ) -> NodeId {
-        self.nodes.alloc(Node::Dispatch {
-            receiver,
-            cast,
-            method,
-            args,
-        })
-    }
-
-    pub fn new_let_in(
-        &mut self,
-        id: Identifier,
-        ty: TypeIdentifier,
-        expr: Option<NodeId>,
-        body: NodeId,
-    ) -> NodeId {
-        self.nodes.alloc(Node::LetIn { id, ty, expr, body })
-    }
-
-    pub fn new_if_then_else(
-        &mut self,
-        condition: NodeId,
-        consequent: NodeId,
-        alternative: NodeId,
-    ) -> NodeId {
-        self.nodes.alloc(Node::IfThenElse {
-            condition,
-            consequent,
-            alternative,
-        })
-    }
-
-    pub fn new_while(&mut self, condition: NodeId, body: NodeId) -> NodeId {
-        self.nodes.alloc(Node::While { condition, body })
-    }
-
-    pub fn new_block(&mut self, exprs: Vec<NodeId>) -> NodeId {
-        self.nodes.alloc(Node::Block { exprs })
-    }
-
-    pub fn new_case(
-        &mut self,
-        expr: NodeId,
-        cases: Vec<(Identifier, TypeIdentifier, NodeId)>,
-    ) -> NodeId {
-        self.nodes.alloc(Node::Case { expr, cases })
-    }
-
-    pub fn new_new(&mut self, ty: TypeIdentifier) -> NodeId {
-        self.nodes.alloc(Node::New { ty })
-    }
-
-    pub fn new_variable_reference(&mut self, id: Identifier) -> NodeId {
-        self.nodes.alloc(Node::VariableReference { id })
-    }
-
-    pub fn new_integer_const(&mut self, c: i64) -> NodeId {
-        self.nodes.alloc(Node::IntegerConst(c))
-    }
-
     pub fn new_string_const(&mut self, s: String) -> NodeId {
         let s = self.intern(s);
-        self.nodes.alloc(Node::StringConst(s))
+        self.new_node(Node::StringConst(s))
     }
 
-    pub fn new_bool_const(&mut self, b: bool) -> NodeId {
-        self.nodes.alloc(Node::BoolConst(b))
+    pub fn env(&self) -> &ty::Environment {
+        &self.env
+    }
+
+    pub fn env_mut(&mut self) -> &mut ty::Environment {
+        &mut self.env
     }
 }

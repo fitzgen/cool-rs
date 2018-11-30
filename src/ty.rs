@@ -1,9 +1,26 @@
 use super::ast;
 use id_arena::{Arena, ArenaBehavior};
 
+#[derive(Default)]
 pub struct Environment {
     types: Arena<Type, TypesArenaBehavior>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Type {
+    Primary(PrimaryType),
+    Method(MethodType),
+    Bottom(BottomType),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PrimaryType {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MethodType {}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BottomType;
 
 struct TypesArenaBehavior;
 
@@ -41,31 +58,10 @@ impl ArenaBehavior for TypesArenaBehavior {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum Type {
-    Primary(PrimaryType),
-    Method(MethodType),
-    Bottom(BottomType),
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct PrimaryType {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MethodType {}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BottomType;
-
 impl Environment {
-    pub fn new(ctx: &ast::Context) -> Environment {
-        let mut env = Environment {
-            types: Arena::new(),
-        };
-        for _ in ctx.nodes() {
-            env.types.alloc(Type::Bottom(BottomType));
-        }
-        env
+    pub(crate) fn alloc(&mut self, id: ast::NodeId) {
+        assert_eq!(self.types.len(), id.index());
+        self.types.alloc(Type::Bottom(BottomType));
     }
 
     pub fn get(&self, id: ast::NodeId) -> &Type {

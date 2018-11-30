@@ -22,104 +22,122 @@ Identifier: ast::Identifier = <i:IdentifierToken> =>
     ctx.new_identifier(i);
 
 Class: ast::NodeId =
-    "class" <t:Type> <parent:("inherits" <Type>)?> "{" <features:(<Feature> ";")*> "}" ";" => {
-        ctx.new_class(t, parent, features)
+    "class" <name:Type> <parent:("inherits" <Type>)?> "{" <features:(<Feature> ";")*> "}" ";" => {
+        ctx.new_node(ast::Node::Class {
+            name,
+            parent,
+            features,
+        })
     };
 
 Feature: ast::NodeId = {
-    <name:Identifier> "(" <formals:SepList<Formal, ",">> ")" ":" <t:Type> "{" <e:Expr<"yes">> "}" =>
-        ctx.new_method(name, formals, t, e),
-    <name:Identifier> ":" <t:Type> <e:("<-" <Expr<"yes">>)?> =>
-        ctx.new_property(name, t, e),
+    <name:Identifier> "(" <formals:SepList<Formal, ",">> ")" ":" <ty:Type> "{" <expr:Expr<"yes">> "}" =>
+        ctx.new_node(ast::Node::Method {
+            name,
+            formals,
+            ty,
+            expr,
+        }),
+    <name:Identifier> ":" <ty:Type> <expr:("<-" <Expr<"yes">>)?> =>
+        ctx.new_node(ast::Node::Property { name, ty, expr }),
 };
 
 Formal: (ast::Identifier, ast::TypeIdentifier) = <i:Identifier> ":" <t:Type> => (i, t);
 
 Expr<AllowLet>: ast::NodeId = {
     <NotExpr<AllowLet>>,
-    <i:Identifier> "<-" <e:Expr<AllowLet>> => ctx.new_assign(i, e),
+    <id:Identifier> "<-" <expr:Expr<AllowLet>> => ctx.new_node(ast::Node::Assign { id, expr }),
 };
 
 NotExpr<AllowLet>: ast::NodeId = {
     <RelExpr<AllowLet>>,
-    "not" <e:RelExpr<AllowLet>> => ctx.new_not(e),
+    "not" <expr:RelExpr<AllowLet>> => ctx.new_node(ast::Node::Not { expr }),
 };
 
 RelExpr<AllowLet>: ast::NodeId = {
     <ArithExpr<AllowLet>>,
-    <lhs:ArithExpr<"no">> "<=" <rhs:ArithExpr<AllowLet>> => ctx.new_less_than_equal(lhs, rhs),
-    <lhs:ArithExpr<"no">> "<" <rhs:ArithExpr<AllowLet>> => ctx.new_less_than(lhs, rhs),
-    <lhs:ArithExpr<"no">> "=" <rhs:ArithExpr<AllowLet>> => ctx.new_equal(lhs, rhs),
+    <lhs:ArithExpr<"no">> "<=" <rhs:ArithExpr<AllowLet>> => ctx.new_node(ast::Node::LessThanEqual { lhs, rhs }),
+    <lhs:ArithExpr<"no">> "<" <rhs:ArithExpr<AllowLet>> => ctx.new_node(ast::Node::LessThan { lhs, rhs }),
+    <lhs:ArithExpr<"no">> "=" <rhs:ArithExpr<AllowLet>> => ctx.new_node(ast::Node::Equal { lhs, rhs }),
 };
 
 ArithExpr<AllowLet>: ast::NodeId = {
     <ProdExpr<AllowLet>>,
-    <lhs:ArithExpr<"no">> "+" <rhs:ProdExpr<AllowLet>> => ctx.new_add(lhs, rhs),
-    <lhs:ArithExpr<"no">> "-" <rhs:ProdExpr<AllowLet>> => ctx.new_sub(lhs, rhs),
+    <lhs:ArithExpr<"no">> "+" <rhs:ProdExpr<AllowLet>> => ctx.new_node(ast::Node::Add { lhs, rhs }),
+    <lhs:ArithExpr<"no">> "-" <rhs:ProdExpr<AllowLet>> => ctx.new_node(ast::Node::Sub { lhs, rhs }),
 };
 
 ProdExpr<AllowLet>: ast::NodeId = {
     <IsVoidExpr<AllowLet>>,
-    <lhs:ProdExpr<"no">> "*" <rhs:IsVoidExpr<AllowLet>> => ctx.new_mul(lhs, rhs),
-    <lhs:ProdExpr<"no">> "/" <rhs:IsVoidExpr<AllowLet>> => ctx.new_div(lhs, rhs),
+    <lhs:ProdExpr<"no">> "*" <rhs:IsVoidExpr<AllowLet>> => ctx.new_node(ast::Node::Mul { lhs, rhs }),
+    <lhs:ProdExpr<"no">> "/" <rhs:IsVoidExpr<AllowLet>> => ctx.new_node(ast::Node::Div { lhs, rhs }),
 };
 
 IsVoidExpr<AllowLet>: ast::NodeId = {
     <NegExpr<AllowLet>>,
-    "isvoid" <e:NegExpr<AllowLet>> => ctx.new_isvoid(e),
+    "isvoid" <expr:NegExpr<AllowLet>> => ctx.new_node(ast::Node::IsVoid { expr }),
 };
 
 NegExpr<AllowLet>: ast::NodeId = {
     <DotExpr<AllowLet>>,
-    "~" <e:DotExpr<AllowLet>> => ctx.new_negate(e),
+    "~" <expr:DotExpr<AllowLet>> => ctx.new_node(ast::Node::Negate { expr }),
 };
 
 DotExpr<AllowLet>: ast::NodeId = {
     <SimpleExpr<AllowLet>>,
-    <e:DotExpr<"no">> <c:("@" <Type>)?> "." <id:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" =>
-        ctx.new_dispatch(e, c, id, args),
+    <receiver:DotExpr<"no">> <cast:("@" <Type>)?> "." <method:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" =>
+        ctx.new_node(ast::Node::Dispatch {
+            receiver,
+            cast,
+            method,
+            args,
+        }),
 };
 
 SimpleExpr<AllowLet>: ast::NodeId = {
     <e:LetExpr> if AllowLet == "yes" => e,
-    <id:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" => {
-        let receiver = ctx.new_identifier("self");
-        let receiver = ctx.new_variable_reference(receiver);
+    <method:Identifier> "(" <args:SepList<Expr<"yes">, ",">> ")" => {
+        let id = ctx.new_identifier("self");
+        let receiver = ctx.new_node(ast::Node::VariableReference { id });
         let cast = None;
-        ctx.new_dispatch(receiver, cast, id, args)
+        ctx.new_node(ast::Node::Dispatch { receiver, cast, method, args })
     },
     "if" <condition:Expr<"yes">> "then" <consequent:Expr<"yes">> "else" <alternative:Expr<"yes">> "fi" =>
-        ctx.new_if_then_else(condition, consequent, alternative),
+        ctx.new_node(ast::Node::IfThenElse {
+            condition,
+            consequent,
+            alternative,
+        }),
     "while" <condition:Expr<"yes">> "loop" <body:Expr<"yes">> "pool" =>
-        ctx.new_while(condition, body),
-    "{" <es:(<Expr<"yes">> ";")+> "}" =>
-        ctx.new_block(es),
-    "case" <e:Expr<"yes">> "of" <cases:(<Identifier> ":" <Type> "=>" <Expr<"yes">> ";")+> "esac" =>
-        ctx.new_case(e, cases),
-    "new" <t:Type> =>
-        ctx.new_new(t),
+        ctx.new_node(ast::Node::While { condition, body }),
+    "{" <exprs:(<Expr<"yes">> ";")+> "}" =>
+        ctx.new_node(ast::Node::Block { exprs }),
+    "case" <expr:Expr<"yes">> "of" <cases:(<Identifier> ":" <Type> "=>" <Expr<"yes">> ";")+> "esac" =>
+        ctx.new_node(ast::Node::Case { expr, cases }),
+    "new" <ty:Type> =>
+        ctx.new_node(ast::Node::New { ty }),
     "(" <e:Expr<"yes">> ")" =>
         e,
     <id:Identifier> =>
-        ctx.new_variable_reference(id),
+        ctx.new_node(ast::Node::VariableReference { id }),
     <i:IntegerToken> =>
-        ctx.new_integer_const(i),
+        ctx.new_node(ast::Node::IntegerConst(i)),
     <s:StringToken> =>
         ctx.new_string_const(s),
     "true" =>
-        ctx.new_bool_const(true),
+        ctx.new_node(ast::Node::BoolConst(true)),
     "false" =>
-        ctx.new_bool_const(false),
+        ctx.new_node(ast::Node::BoolConst(false)),
 };
 
 LetExpr: ast::NodeId = {
-    "let" <id:Identifier> ":" <ty:Type> <e:("<-" <Expr<"yes">>)?>
+    "let" <id:Identifier> ":" <ty:Type> <expr:("<-" <Expr<"yes">>)?>
         <bindings:("," <Identifier> ":" <Type> <("<-" <Expr<"yes">>)?> )*>
         "in" <body:Expr<"yes">> => {
             let body = bindings.into_iter().rev().fold(body, |body, (id, ty, expr)| {
-                ctx.new_let_in(id, ty, expr, body)
+                ctx.new_node(ast::Node::LetIn { id, ty, expr, body })
             });
-            ctx.new_let_in(id, ty, e, body)
+            ctx.new_node(ast::Node::LetIn { id, ty, expr, body })
         }
 };
 

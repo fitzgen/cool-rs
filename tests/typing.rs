@@ -13,7 +13,6 @@ fn assert_typing(input: &Path, expected: &Path) {
     let mut lexer = frontend::lexer::Lexer::new(&source);
     let parser = frontend::parser::ProgramParser::new();
     let classes = parser.parse(&mut ctx, &mut lexer).unwrap();
-    let env = ty::Environment::new(&ctx);
 
     unimplemented!()
 }
