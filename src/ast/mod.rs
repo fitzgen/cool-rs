@@ -2,6 +2,7 @@ mod dump;
 pub use self::dump::DumpAst;
 
 use crate::ty;
+use failure::bail;
 use id_arena::{Arena, Id};
 use std::collections::HashMap;
 
@@ -12,15 +13,16 @@ pub struct Context {
 
     nodes: Arena<Node>,
     env: ty::Environment,
+    class_name_to_node: Option<HashMap<TypeIdentifier, NodeId>>,
 }
 
 pub type StringId = Id<String>;
 pub type NodeId = Id<Node>;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct TypeIdentifier(pub StringId);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Identifier(pub StringId);
 
 pub enum Node {
@@ -171,5 +173,28 @@ impl Context {
 
     pub fn env_mut(&mut self) -> &mut ty::Environment {
         &mut self.env
+    }
+
+    pub fn create_class_name_to_node_map(&mut self) -> Result<(), failure::Error> {
+        let mut map = HashMap::new();
+        for (id, node) in self.nodes.iter() {
+            if let Node::Class { name, .. } = *node {
+                if map.insert(name, id).is_some() {
+                    let class_name = self.interned_str_ref(name.0);
+                    bail!("Redefinition of class `{}`", class_name);
+                }
+            }
+        }
+        self.class_name_to_node = Some(map);
+        Ok(())
+    }
+
+    pub fn get_class_by_name(&self, class_name: TypeIdentifier) -> NodeId {
+        *self
+            .class_name_to_node
+            .as_ref()
+            .expect("should have called `create_class_name_to_node_map` already")
+            .get(&class_name)
+            .expect("no class with given class name")
     }
 }
