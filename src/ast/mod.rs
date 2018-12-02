@@ -4,6 +4,7 @@ pub use self::inheritance_graph::InheritanceGraph;
 mod dump;
 pub use self::dump::DumpAst;
 
+use crate::frontend;
 use crate::ty;
 use failure::bail;
 use id_arena::{Arena, Id};
@@ -179,22 +180,15 @@ impl Context {
         &mut self.env
     }
 
-    pub fn create_class_name_to_node_map(
+    fn create_class_name_to_node_map(
         &self,
     ) -> Result<HashMap<TypeIdentifier, NodeId>, failure::Error> {
         let mut map = HashMap::new();
         for (id, node) in self.nodes.iter() {
             if let Node::Class { name, .. } = *node {
-                let class_name = self.interned_str_ref(name.0);
-                match class_name {
-                    "Object" | "IO" | "Int" | "Bool" | "String" => {
-                        bail!("Redefinition of the builtin class `{}`", class_name)
-                    }
-                    _ => {
-                        if map.insert(name, id).is_some() {
-                            bail!("Redefinition of class `{}`", class_name);
-                        }
-                    }
+                if map.insert(name, id).is_some() {
+                    let class_name = self.interned_str_ref(name.0);
+                    bail!("Redefinition of class `{}`", class_name);
                 }
             }
         }
@@ -210,7 +204,7 @@ impl Context {
             .expect("no class with given class name")
     }
 
-    pub fn create_subclasses_map(&self) -> HashMap<NodeId, Vec<NodeId>> {
+    fn create_subclasses_map(&self) -> HashMap<NodeId, Vec<NodeId>> {
         let mut map = HashMap::new();
         for (id, node) in self.nodes.iter() {
             if let Node::Class {
@@ -241,13 +235,23 @@ impl Context {
     }
 
     pub fn type_check(&mut self) -> Result<(), failure::Error> {
+        self.add_self_hosted_builtins();
         self.class_name_to_node = Some(self.create_class_name_to_node_map()?);
         self.subclasses_map = Some(self.create_subclasses_map());
         self.check_inheritance()?;
         unimplemented!("TODO FITZGEN: finish type checking")
     }
 
-    pub fn check_inheritance(&self) -> Result<(), failure::Error> {
+    fn add_self_hosted_builtins(&mut self) {
+        let source = include_str!("../builtins.cool");
+        let mut lexer = frontend::lexer::Lexer::new(source);
+        let parser = frontend::parser::ProgramParser::new();
+        parser
+            .parse(self, &mut lexer)
+            .expect("self-hosted code should never fail to parse");
+    }
+
+    fn check_inheritance(&self) -> Result<(), failure::Error> {
         let inheritance_graph = inheritance_graph::InheritanceGraph::new(self);
         let mut sccs = petgraph::algo::kosaraju_scc(&inheritance_graph);
         sccs.retain(|scc| scc.len() > 1);

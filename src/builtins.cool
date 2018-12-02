@@ -1,0 +1,50 @@
+class Object {
+  abort() : Object {{
+    builtin_abort();
+    self;
+  }};
+
+  type_name() : String {
+    builtin_type_name(self)
+  };
+
+  copy() : SELF_TYPE {
+    builtin_copy(self)
+  };
+};
+
+class IO {
+  out_string(x : String) : SELF_TYPE {{
+    builtin_write_string(x);
+    self;
+  }};
+
+  out_int(x : Int) : SELF_TYPE {{
+    builtin_write_int(x);
+    self;
+  }};
+
+  in_string() : String {
+    builtin_read_string()
+  };
+
+  in_int() : Int {
+    builtin_read_int()
+  };
+};
+
+class Int {};
+
+class String {
+  length() : Int {
+    builtin_string_length(self)
+  };
+
+  concat(s : String) : String {
+    builtin_string_concat(self, s)
+  };
+
+  substr(i : Int, l : Int) : String {
+    builtin_string_substr(self, i, l)
+  };
+};
