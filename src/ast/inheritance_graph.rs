@@ -1,5 +1,6 @@
 use petgraph::visit;
 use std::collections::HashSet;
+use std::vec;
 
 pub struct InheritanceGraph<'a> {
     ctx: &'a super::Context,
@@ -63,6 +64,69 @@ impl<'a> visit::IntoNeighbors for &'a InheritanceGraph<'a> {
         Neighbors {
             ctx: self.ctx,
             node,
+        }
+    }
+}
+
+pub struct NeighborsDirected {
+    iter: vec::IntoIter<super::NodeId>,
+}
+
+impl Iterator for NeighborsDirected {
+    type Item = super::NodeId;
+
+    #[inline]
+    fn next(&mut self) -> Option<super::NodeId> {
+        self.iter.next()
+    }
+}
+
+impl<'a> visit::IntoNeighborsDirected for &'a InheritanceGraph<'a> {
+    type NeighborsDirected = NeighborsDirected;
+
+    fn neighbors_directed(
+        self,
+        node: super::NodeId,
+        direction: petgraph::Direction,
+    ) -> Self::NeighborsDirected {
+        match direction {
+            petgraph::Direction::Outgoing => NeighborsDirected {
+                iter: visit::IntoNeighbors::neighbors(self, node)
+                    .collect::<Vec<_>>()
+                    .into_iter(),
+            },
+            petgraph::Direction::Incoming => NeighborsDirected {
+                iter: self.ctx.get_subclasses(node).to_vec().into_iter(),
+            },
+        }
+    }
+}
+
+pub struct NodeIdentifiers {
+    iter: vec::IntoIter<super::NodeId>,
+}
+
+impl Iterator for NodeIdentifiers {
+    type Item = super::NodeId;
+
+    #[inline]
+    fn next(&mut self) -> Option<super::NodeId> {
+        self.iter.next()
+    }
+}
+
+impl<'a> visit::IntoNodeIdentifiers for &'a InheritanceGraph<'a> {
+    type NodeIdentifiers = NodeIdentifiers;
+
+    fn node_identifiers(self) -> Self::NodeIdentifiers {
+        let mut classes = vec![];
+        for (id, node) in self.ctx.nodes() {
+            if let super::Node::Class { .. } = node {
+                classes.push(id);
+            }
+        }
+        NodeIdentifiers {
+            iter: classes.into_iter(),
         }
     }
 }

@@ -17,6 +17,7 @@ pub struct Context {
     nodes: Arena<Node>,
     env: ty::Environment,
     class_name_to_node: Option<HashMap<TypeIdentifier, NodeId>>,
+    subclasses_map: Option<HashMap<NodeId, Vec<NodeId>>>,
 }
 
 pub type StringId = Id<String>;
@@ -178,18 +179,26 @@ impl Context {
         &mut self.env
     }
 
-    pub fn create_class_name_to_node_map(&mut self) -> Result<(), failure::Error> {
+    pub fn create_class_name_to_node_map(
+        &self,
+    ) -> Result<HashMap<TypeIdentifier, NodeId>, failure::Error> {
         let mut map = HashMap::new();
         for (id, node) in self.nodes.iter() {
             if let Node::Class { name, .. } = *node {
-                if map.insert(name, id).is_some() {
-                    let class_name = self.interned_str_ref(name.0);
-                    bail!("Redefinition of class `{}`", class_name);
+                let class_name = self.interned_str_ref(name.0);
+                match class_name {
+                    "Object" | "IO" | "Int" | "Bool" | "String" => {
+                        bail!("Redefinition of the builtin class `{}`", class_name)
+                    }
+                    _ => {
+                        if map.insert(name, id).is_some() {
+                            bail!("Redefinition of class `{}`", class_name);
+                        }
+                    }
                 }
             }
         }
-        self.class_name_to_node = Some(map);
-        Ok(())
+        Ok(map)
     }
 
     pub fn get_class_by_name(&self, class_name: TypeIdentifier) -> NodeId {
@@ -199,5 +208,74 @@ impl Context {
             .expect("should have called `create_class_name_to_node_map` already")
             .get(&class_name)
             .expect("no class with given class name")
+    }
+
+    pub fn create_subclasses_map(&self) -> HashMap<NodeId, Vec<NodeId>> {
+        let mut map = HashMap::new();
+        for (id, node) in self.nodes.iter() {
+            if let Node::Class {
+                parent: Some(parent),
+                ..
+            } = node
+            {
+                let parent = self.get_class_by_name(*parent);
+                map.entry(parent).or_insert_with(Vec::default).push(id);
+            }
+        }
+        map
+    }
+
+    pub fn get_subclasses(&self, class: NodeId) -> &[NodeId] {
+        self.subclasses_map
+            .as_ref()
+            .expect("should have called `create_subclasses_map` already")
+            .get(&class)
+            .map(|v| &v[..])
+            .unwrap_or(&[])
+    }
+
+    pub fn class_name(&self, class: NodeId) -> Option<&str> {
+        self.nodes[class]
+            .class_name()
+            .map(|t| self.interned_str_ref(t.0))
+    }
+
+    pub fn type_check(&mut self) -> Result<(), failure::Error> {
+        self.class_name_to_node = Some(self.create_class_name_to_node_map()?);
+        self.subclasses_map = Some(self.create_subclasses_map());
+        self.check_inheritance()?;
+        unimplemented!("TODO FITZGEN: finish type checking")
+    }
+
+    pub fn check_inheritance(&self) -> Result<(), failure::Error> {
+        let inheritance_graph = inheritance_graph::InheritanceGraph::new(self);
+        let mut sccs = petgraph::algo::kosaraju_scc(&inheritance_graph);
+        sccs.retain(|scc| scc.len() > 1);
+        if sccs.is_empty() {
+            return Ok(());
+        }
+
+        let mut msg = String::new();
+        for scc in sccs {
+            let names: Vec<String> = scc
+                .into_iter()
+                .map(|id| self.class_name(id).unwrap().to_string())
+                .collect();
+            let names: String = names.join(", ");
+            msg.push_str(&format!(
+                "Found inheritance cycle involving classes: {}\n",
+                names
+            ));
+        }
+        bail!("{}", msg)
+    }
+}
+
+impl Node {
+    pub fn class_name(&self) -> Option<TypeIdentifier> {
+        match self {
+            Node::Class { name, .. } => Some(*name),
+            _ => None,
+        }
     }
 }
