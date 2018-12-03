@@ -13,6 +13,9 @@ pub struct Environment {
 
     // Maps from a class to a map of that class's methods keyed by method name.
     class_inherited_methods: Option<HashMap<ast::NodeId, HashMap<ast::StringId, ast::NodeId>>>,
+
+    // Maps from a class to a map of that class's attributes keyed by attribute name.
+    class_inherited_attributes: Option<HashMap<ast::NodeId, HashMap<ast::StringId, ast::NodeId>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -99,6 +102,11 @@ impl Environment {
             } = node
             {
                 assert!(self.get(id).is_bottom());
+
+                if ctx.interned_str_ref(name.0) == "self" {
+                    bail!("Cannot use `self` as a method name");
+                }
+
                 let mut params = vec![];
                 for &(p_id, ty_id) in formals {
                     let ty_name = ctx.interned_str_ref(ty_id.0);
@@ -144,6 +152,7 @@ impl Environment {
     }
 
     fn add_self_methods(
+        &self,
         ctx: &ast::Context,
         methods: &mut HashMap<ast::StringId, ast::NodeId>,
         class: ast::NodeId,
@@ -163,10 +172,11 @@ impl Environment {
                             ctx.interned_str_ref(name.0)
                         );
                     }
-                    // TODO: if this is an override, check that all args are
-                    // more permissive than super's args, and return is less
-                    // permissive than super's return
-                    methods.insert(name.0, *f);
+                    if let Some(overridden) = methods.insert(name.0, *f) {
+                        if self.get(overridden) != self.get(*f) {
+                            bail!("method overrides must have the same type");
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -191,7 +201,7 @@ impl Environment {
 
         let object = ctx.get_object_class();
         let mut methods = HashMap::new();
-        Self::add_self_methods(ctx, &mut methods, object)
+        self.add_self_methods(ctx, &mut methods, object)
             .expect("object methods should always type check");
         map.insert(object, methods);
         dfs.discovered.insert(object);
@@ -202,16 +212,112 @@ impl Environment {
         {
             let parent = parent.map_or_else(|| ctx.get_object_class(), |p| ctx.class_by_name(p));
             let mut methods = map[&parent].clone();
-            Self::add_self_methods(ctx, &mut methods, id)?;
+            self.add_self_methods(ctx, &mut methods, id)?;
             map.insert(id, methods);
         }
 
         Ok(map)
     }
 
-    pub fn check_method_signatures(&mut self, ctx: &ast::Context) -> Result<(), failure::Error> {
+    fn define_attribute_types(&mut self, ctx: &ast::Context) -> Result<(), failure::Error> {
+        for (id, node) in ctx.nodes() {
+            if let ast::Node::Property { name, ty, .. } = node {
+                assert!(self.get(id).is_bottom());
+
+                if ctx.interned_str_ref(name.0) == "self" {
+                    bail!("Cannot define attribute named `self`");
+                }
+
+                if ctx.get_class_by_name(*ty).is_none() {
+                    bail!(
+                        "Cannot have an attribute of an undefined class `{}`",
+                        ctx.interned_str_ref(ty.0)
+                    );
+                }
+
+                self.types[id.into()] = if ctx.interned_str_ref(ty.0) == "SELF_TYPE" {
+                    Type::SelfType(SelfType)
+                } else {
+                    Type::Nominal(NominalType(*ty))
+                };
+            }
+        }
+
+        Ok(())
+    }
+
+    fn add_self_attributes(
+        &self,
+        ctx: &ast::Context,
+        attributes: &mut HashMap<ast::StringId, ast::NodeId>,
+        class: ast::NodeId,
+    ) -> Result<(), failure::Error> {
+        let mut this_class_attributes = HashSet::new();
+
+        let features = match ctx.node_ref(class) {
+            ast::Node::Class { ref features, .. } => features,
+            _ => panic!("adding attributes of non-class?"),
+        };
+        for f in features {
+            match ctx.node_ref(*f) {
+                ast::Node::Property { name, .. } => {
+                    if !this_class_attributes.insert(name) {
+                        bail!(
+                            "Duplicate attribute definitions for attribute `{}`",
+                            ctx.interned_str_ref(name.0)
+                        );
+                    }
+
+                    if let Some(overridden) = attributes.insert(name.0, *f) {
+                        if self.get(overridden) != self.get(*f) {
+                            bail!("Attribute overrides must have the same type");
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Ok(())
+    }
+
+    fn create_class_inherited_attributes(
+        &self,
+        ctx: &ast::Context,
+    ) -> Result<HashMap<ast::NodeId, HashMap<ast::StringId, ast::NodeId>>, failure::Error> {
+        let mut map: HashMap<ast::NodeId, HashMap<ast::StringId, ast::NodeId>> = HashMap::new();
+
+        let graph = ast::InheritanceGraph::new(ctx);
+        let mut dfs = petgraph::visit::DfsPostOrder::empty(&graph);
+        for (id, node) in ctx.nodes() {
+            if let ast::Node::Class { .. } = node {
+                dfs.stack.push(id);
+            }
+        }
+
+        let object = ctx.get_object_class();
+        dfs.discovered.insert(object);
+        dfs.finished.insert(object);
+
+        while let Some((id, ast::Node::Class { parent, .. })) =
+            dfs.next(&graph).map(|id| (id, ctx.node_ref(id)))
+        {
+            let parent = parent.map_or_else(|| ctx.get_object_class(), |p| ctx.class_by_name(p));
+            let mut attributes = map[&parent].clone();
+            self.add_self_attributes(ctx, &mut attributes, id)?;
+            map.insert(id, attributes);
+        }
+
+        Ok(map)
+    }
+
+    pub fn check_signatures(&mut self, ctx: &ast::Context) -> Result<(), failure::Error> {
         self.define_method_types(ctx)?;
         self.class_inherited_methods = Some(self.create_class_inherited_methods(ctx)?);
+
+        self.define_attribute_types(ctx)?;
+        self.class_inherited_attributes = Some(self.create_class_inherited_attributes(ctx)?);
+
         Ok(())
     }
 }

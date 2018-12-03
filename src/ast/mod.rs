@@ -276,7 +276,7 @@ impl Context {
         self.check_inheritance()?;
 
         let mut env = self.env.take().unwrap();
-        env.check_method_signatures(self)?;
+        env.check_signatures(self)?;
 
         unimplemented!("TODO FITZGEN: finish type checking");
         self.env = Some(env);
