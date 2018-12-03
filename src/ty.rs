@@ -100,11 +100,17 @@ impl Environment {
             {
                 assert!(self.get(id).is_bottom());
                 let mut params = vec![];
-                for &(_, ty_id) in formals {
+                for &(p_id, ty_id) in formals {
                     let ty_name = ctx.interned_str_ref(ty_id.0);
                     if let "SELF_TYPE" = ty_name {
                         bail!("Cannot use `SELF_TYPE` in parameters");
                     }
+
+                    let p_name = ctx.interned_str_ref(p_id.0);
+                    if let "self" = p_name {
+                        bail!("Cannot use `self` as a parameter name");
+                    }
+
                     if ctx.get_class_by_name(ty_id).is_none() {
                         bail!(
                             "`{}` method takes parameter of undefined class `{}`",
