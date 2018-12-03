@@ -48,7 +48,7 @@ impl<'a> Iterator for Neighbors<'a> {
                 parent: Some(parent),
                 features: _,
             } => {
-                self.node = self.ctx.get_class_by_name(*parent);
+                self.node = self.ctx.class_by_name(*parent);
                 Some(self.node)
             }
             _ => None,

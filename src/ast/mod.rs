@@ -6,19 +6,34 @@ pub use self::dump::DumpAst;
 
 use crate::frontend;
 use crate::ty;
-use failure::bail;
+use failure::{bail, format_err};
 use id_arena::{Arena, Id};
 use std::collections::HashMap;
 
-#[derive(Default)]
 pub struct Context {
     idents: Arena<String>,
     already_interned: HashMap<String, StringId>,
 
     nodes: Arena<Node>,
-    env: ty::Environment,
+
+    env: Option<ty::Environment>,
     class_name_to_node: Option<HashMap<TypeIdentifier, NodeId>>,
+    object_class: Option<NodeId>,
     subclasses_map: Option<HashMap<NodeId, Vec<NodeId>>>,
+}
+
+impl Default for Context {
+    fn default() -> Context {
+        Context {
+            idents: Default::default(),
+            already_interned: Default::default(),
+            nodes: Default::default(),
+            env: Some(Default::default()),
+            class_name_to_node: None,
+            object_class: None,
+            subclasses_map: None,
+        }
+    }
 }
 
 pub type StringId = Id<String>;
@@ -145,7 +160,7 @@ impl Context {
 
     pub fn new_node(&mut self, node: Node) -> NodeId {
         let id = self.nodes.alloc(node);
-        self.env.alloc(id);
+        self.env_mut().alloc(id);
         id
     }
 
@@ -173,11 +188,11 @@ impl Context {
     }
 
     pub fn env(&self) -> &ty::Environment {
-        &self.env
+        self.env.as_ref().unwrap()
     }
 
     pub fn env_mut(&mut self) -> &mut ty::Environment {
-        &mut self.env
+        self.env.as_mut().unwrap()
     }
 
     fn create_class_name_to_node_map(
@@ -186,8 +201,12 @@ impl Context {
         let mut map = HashMap::new();
         for (id, node) in self.nodes.iter() {
             if let Node::Class { name, .. } = *node {
+                let class_name = self.interned_str_ref(name.0);
+                if "SELF_TYPE" == class_name {
+                    bail!("Cannot define SELF_TYPE as a new class");
+                }
+
                 if map.insert(name, id).is_some() {
-                    let class_name = self.interned_str_ref(name.0);
                     bail!("Redefinition of class `{}`", class_name);
                 }
             }
@@ -195,16 +214,20 @@ impl Context {
         Ok(map)
     }
 
-    pub fn get_class_by_name(&self, class_name: TypeIdentifier) -> NodeId {
-        *self
-            .class_name_to_node
+    pub fn get_class_by_name(&self, class_name: TypeIdentifier) -> Option<NodeId> {
+        self.class_name_to_node
             .as_ref()
             .expect("should have called `create_class_name_to_node_map` already")
             .get(&class_name)
+            .cloned()
+    }
+
+    pub fn class_by_name(&self, class_name: TypeIdentifier) -> NodeId {
+        self.get_class_by_name(class_name)
             .expect("no class with given class name")
     }
 
-    fn create_subclasses_map(&self) -> HashMap<NodeId, Vec<NodeId>> {
+    fn create_subclasses_map(&self) -> Result<HashMap<NodeId, Vec<NodeId>>, failure::Error> {
         let mut map = HashMap::new();
         for (id, node) in self.nodes.iter() {
             if let Node::Class {
@@ -212,11 +235,16 @@ impl Context {
                 ..
             } = node
             {
-                let parent = self.get_class_by_name(*parent);
+                let parent = self.get_class_by_name(*parent).ok_or_else(|| {
+                    format_err!(
+                        "Cannot inherit from undefined class `{}`",
+                        self.interned_str_ref(parent.0)
+                    )
+                })?;
                 map.entry(parent).or_insert_with(Vec::default).push(id);
             }
         }
-        map
+        Ok(map)
     }
 
     pub fn get_subclasses(&self, class: NodeId) -> &[NodeId] {
@@ -234,12 +262,24 @@ impl Context {
             .map(|t| self.interned_str_ref(t.0))
     }
 
+    pub fn get_object_class(&self) -> NodeId {
+        self.object_class
+            .expect("should have called `create_class_name_to_node_map` already")
+    }
+
     pub fn type_check(&mut self) -> Result<(), failure::Error> {
         self.add_self_hosted_builtins();
         self.class_name_to_node = Some(self.create_class_name_to_node_map()?);
-        self.subclasses_map = Some(self.create_subclasses_map());
+        let object = self.intern("Object");
+        self.object_class = Some(self.class_by_name(TypeIdentifier(object)));
+        self.subclasses_map = Some(self.create_subclasses_map()?);
         self.check_inheritance()?;
-        unimplemented!("TODO FITZGEN: finish type checking")
+
+        let mut env = self.env.take().unwrap();
+        env.check_method_signatures(self)?;
+
+        unimplemented!("TODO FITZGEN: finish type checking");
+        self.env = Some(env);
     }
 
     fn add_self_hosted_builtins(&mut self) {
@@ -252,6 +292,23 @@ impl Context {
     }
 
     fn check_inheritance(&self) -> Result<(), failure::Error> {
+        // Ensure that nothing inherits from the builtins that you can't extend.
+        for (_, node) in self.nodes.iter() {
+            if let Node::Class {
+                parent: Some(parent),
+                ..
+            } = node
+            {
+                match self.interned_str_ref(parent.0) {
+                    c @ "SELF_TYPE" | c @ "Int" | c @ "String" | c @ "Bool" => {
+                        bail!("Cannot inherit from `{}`", c)
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Check for cycles in the inheritance graph.
         let inheritance_graph = inheritance_graph::InheritanceGraph::new(self);
         let mut sccs = petgraph::algo::kosaraju_scc(&inheritance_graph);
         sccs.retain(|scc| scc.len() > 1);
