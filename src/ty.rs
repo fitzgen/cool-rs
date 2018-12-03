@@ -107,8 +107,16 @@ impl Environment {
                     bail!("Cannot use `self` as a method name");
                 }
 
+                let mut param_ids = HashSet::new();
                 let mut params = vec![];
                 for &(p_id, ty_id) in formals {
+                    if !param_ids.insert(p_id) {
+                        bail!(
+                            "Cannot have duplicate formal parameter names in method `{}`",
+                            ctx.interned_str_ref(name.0)
+                        );
+                    }
+
                     let ty_name = ctx.interned_str_ref(ty_id.0);
                     if let "SELF_TYPE" = ty_name {
                         bail!("Cannot use `SELF_TYPE` in parameters");
