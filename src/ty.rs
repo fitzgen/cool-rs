@@ -276,10 +276,8 @@ impl Environment {
                         );
                     }
 
-                    if let Some(overridden) = attributes.insert(name.0, *f) {
-                        if self.get(overridden) != self.get(*f) {
-                            bail!("Attribute overrides must have the same type");
-                        }
+                    if attributes.insert(name.0, *f).is_some() {
+                        bail!("Cannot override attributes");
                     }
                 }
                 _ => {}
@@ -304,6 +302,7 @@ impl Environment {
         }
 
         let object = ctx.get_object_class();
+        map.insert(object, Default::default());
         dfs.discovered.insert(object);
         dfs.finished.insert(object);
 
