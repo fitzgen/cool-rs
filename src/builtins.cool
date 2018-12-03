@@ -35,6 +35,8 @@ class IO inherits Object {
 
 class Int inherits Object {};
 
+class Bool inherits Object {};
+
 class String inherits Object {
   length() : Int {
     builtin_string_length(self)
