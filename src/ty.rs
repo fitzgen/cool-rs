@@ -3,7 +3,7 @@
 // * static dispatch cannot use SELF_TYPE
 
 use super::ast;
-use failure::bail;
+use failure::{bail, ResultExt};
 use id_arena::{Arena, ArenaBehavior};
 use std::collections::{HashMap, HashSet};
 
@@ -16,6 +16,10 @@ pub struct Environment {
 
     // Maps from a class to a map of that class's attributes keyed by attribute name.
     class_inherited_attributes: Option<HashMap<ast::NodeId, HashMap<ast::StringId, ast::NodeId>>>,
+
+    current_class: Option<ast::NodeId>,
+    data_scope: Vec<HashMap<ast::Identifier, Type>>,
+    method_scope: Vec<HashMap<ast::Identifier, Type>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -49,6 +53,13 @@ struct TypeId(usize);
 impl From<ast::NodeId> for TypeId {
     #[inline]
     fn from(id: ast::NodeId) -> TypeId {
+        TypeId(id.index())
+    }
+}
+
+impl<'a> From<&'a ast::NodeId> for TypeId {
+    #[inline]
+    fn from(id: &'a ast::NodeId) -> TypeId {
         TypeId(id.index())
     }
 }
@@ -93,6 +104,19 @@ impl Environment {
 
     pub fn get_method(&self, id: ast::NodeId) -> &MethodType {
         self.get(id).unwrap_method()
+    }
+
+    fn get_data_id_ty(&self, id: ast::Identifier) -> Result<TypeId, failure::Error> {
+        unimplemented!("get_data_id_ty")
+    }
+
+    fn get_method_id_ty(&self, id: ast::Identifier) -> Result<TypeId, failure::Error> {
+        unimplemented!("get_method_id_ty")
+    }
+
+    /// Is `a` a subtype of `b`?
+    fn is_subtype(&self, a: TypeId, b: TypeId) -> bool {
+        unimplemented!("is_subtype")
     }
 
     fn define_method_types(&mut self, ctx: &ast::Context) -> Result<(), failure::Error> {
@@ -327,6 +351,222 @@ impl Environment {
 
         Ok(())
     }
+
+    pub fn check_bodies(&mut self, ctx: &ast::Context) -> Result<(), failure::Error> {
+        for (id, node) in ctx.nodes() {
+            if let ast::Node::Class {
+                name: _,
+                parent: _,
+                features,
+            } = node
+            {
+                self.current_class = Some(id);
+                self.method_scope.push(
+                    self.class_inherited_methods
+                        .as_ref()
+                        .expect("should have called `create_class_inherited_methods` already")[&id]
+                        .iter()
+                        .map(|(k, v)| (ast::Identifier(*k), self.get(*v).clone()))
+                        .collect(),
+                );
+                self.data_scope.push(
+                    self.class_inherited_attributes
+                        .as_ref()
+                        .expect("should have called `create_class_inherited_attributes` already")
+                        [&id]
+                        .iter()
+                        .map(|(k, v)| (ast::Identifier(*k), self.get(*v).clone()))
+                        .collect(),
+                );
+
+                for f in features {
+                    match ctx.node_ref(*f) {
+                        ast::Node::Method { formals, expr, .. } => {
+                            self.data_scope.push(
+                                formals
+                                    .iter()
+                                    .map(|(k, v)| (*k, Type::Nominal(NominalType(*v))))
+                                    .collect(),
+                            );
+                            self.check_expr(ctx, *expr)?;
+                        }
+                        ast::Node::Property {
+                            expr: Some(expr), ..
+                        } => self.check_expr(ctx, *expr)?,
+                        // TODO: handle expr.is_none() case...
+                        f => panic!("bad feature of class? {:?}", f),
+                    }
+                }
+
+                self.data_scope.clear();
+                self.method_scope.clear();
+                self.current_class = None;
+            }
+        }
+        Ok(())
+    }
+
+    fn check_expr_expected_ty(
+        &mut self,
+        ctx: &ast::Context,
+        expr: ast::NodeId,
+        expected: &Type,
+    ) -> Result<(), failure::Error> {
+        self.check_expr(ctx, expr)?;
+        if &self.types[expr.into()] != expected {
+            failure::bail!(
+                "expected {:?}, found {:?}",
+                &self.types[expr.into()],
+                &expected
+            );
+        }
+        Ok(())
+    }
+
+    fn check_expr(
+        &mut self,
+        ctx: &ast::Context,
+        this_expr: ast::NodeId,
+    ) -> Result<(), failure::Error> {
+        assert!(self.get(this_expr).is_bottom());
+        let this_expr_ty: TypeId = this_expr.into();
+
+        match ctx.node_ref(this_expr) {
+            ast::Node::IntegerConst(_) => {
+                self.types[this_expr_ty] = Type::builtin(ctx, "Int");
+                Ok(())
+            }
+            ast::Node::StringConst(_) => {
+                self.types[this_expr_ty] = Type::builtin(ctx, "String");
+                Ok(())
+            }
+            ast::Node::BoolConst(_) => {
+                self.types[this_expr_ty] = Type::builtin(ctx, "Bool");
+                Ok(())
+            }
+            ast::Node::Assign { id, expr } => {
+                let id_ty = self.get_data_id_ty(*id)?;
+                self.check_expr(ctx, *expr)?;
+                if !self.is_subtype(this_expr_ty, id_ty) {
+                    failure::bail!(
+                        "bad assign: expected {:?}, found {:?}",
+                        &self.types[this_expr_ty],
+                        &self.types[id_ty]
+                    );
+                }
+                self.types[this_expr_ty] = self.types[expr.into()].clone();
+                Ok(())
+            }
+            ast::Node::Not { expr } => {
+                let bool = Type::builtin(ctx, "Bool");
+                self.check_expr_expected_ty(ctx, *expr, &bool)
+                    .context("bad `not` expression")?;
+                self.types[this_expr_ty] = bool;
+                Ok(())
+            }
+            ast::Node::LessThanEqual { lhs, rhs } | ast::Node::LessThan { lhs, rhs } => {
+                let int = Type::builtin(ctx, "Int");
+                self.check_expr_expected_ty(ctx, *lhs, &int)
+                    .context("bad left-hand side for `<=`")?;
+                self.check_expr_expected_ty(ctx, *rhs, &int)
+                    .context("bad right-hand side for `<=`")?;
+                self.types[this_expr_ty] = Type::builtin(ctx, "bool");
+                Ok(())
+            }
+            ast::Node::Equal { lhs, rhs } => {
+                let string = Type::builtin(ctx, "String");
+                let int = Type::builtin(ctx, "Int");
+                let bool = Type::builtin(ctx, "Bool");
+
+                self.check_expr(ctx, *lhs)?;
+                let lhs_ty = &self.types[lhs.into()];
+                if !(lhs_ty == &string || lhs_ty == &int || lhs_ty == &bool) {
+                    bail!(
+                        "bad left-hand side to `=` expression; expected `String`, `Int`, or \
+                         `Bool`, but found {:?}",
+                        lhs_ty
+                    );
+                }
+
+                self.check_expr(ctx, *rhs)?;
+                let rhs_ty = &self.types[rhs.into()];
+                if !(rhs_ty == &string || rhs_ty == &int || rhs_ty == &bool) {
+                    bail!(
+                        "bad right-hand side to `=` expression; expected `String`, `Int`, or \
+                         `Bool`, but found {:?}",
+                        rhs_ty
+                    );
+                }
+
+                if self.types[lhs.into()] != self.types[rhs.into()] {
+                    bail!(
+                        "bad `=` expression; left-hand side = {:?} but right-hand side = {:?}",
+                        &self.types[lhs.into()],
+                        &self.types[rhs.into()]
+                    )
+                }
+
+                Ok(())
+            }
+            ast::Node::Add { lhs, rhs }
+            | ast::Node::Sub { lhs, rhs }
+            | ast::Node::Mul { lhs, rhs }
+            | ast::Node::Div { lhs, rhs } => {
+                let int = Type::builtin(ctx, "Int");
+                self.check_expr_expected_ty(ctx, *lhs, &int)
+                    .context("bad left-hand side of binary arithmetic expression")?;
+                self.check_expr_expected_ty(ctx, *rhs, &int)
+                    .context("bad left-hand side of binary arithmetic expression")?;
+                self.types[this_expr_ty] = int;
+                Ok(())
+            }
+            ast::Node::IsVoid { expr } => {
+                self.check_expr(ctx, *expr)?;
+                self.types[this_expr_ty] = Type::builtin(ctx, "Bool");
+                Ok(())
+            }
+            ast::Node::Negate { expr } => {
+                let int = Type::builtin(ctx, "Int");
+                self.check_expr_expected_ty(ctx, *expr, &int)
+                    .context("bad negation expression")?;
+                self.types[this_expr_ty] = int;
+                Ok(())
+            }
+            // ast::Node::Dispatch {
+            //     receiver,
+            //     cast: Option<TypeIdentifier>,
+            //     method: Identifier,
+            //     args: Vec<NodeId>,
+            // },
+            ast::Node::LetIn { id, ty, expr, body } => {
+                unimplemented!("let/in");
+                Ok(())
+            }
+            // ast::Node::IfThenElse {
+            //     condition,
+            //     consequent,
+            //     alternative,
+            // },
+            // ast::Node::While {
+            //     condition,
+            //     body,
+            // },
+            // ast::Node::Block {
+            //     exprs: Vec<NodeId>,
+            // },
+            // ast::Node::Case {
+            //     expr,
+            //     cases: Vec<(Identifier, TypeIdentifier, NodeId)>,
+            // },
+            // ast::Node::New {
+            //     ty: TypeIdentifier,
+            // },
+            // ast::Node::VariableReference {
+            //     id: Identifier,
+            // },
+            _ => unimplemented!("check_expr"),
+        }
+    }
 }
 
 macro_rules! is_get_and_unwrap {
@@ -359,4 +599,9 @@ impl Type {
         SelfType
     );
     is_get_and_unwrap!(is_bottom, bottom, unwrap_bottom, BottomType, Bottom);
+
+    fn builtin(ctx: &ast::Context, builtin: &str) -> Type {
+        let s = ctx.already_interned(builtin);
+        Type::Nominal(NominalType(ast::TypeIdentifier(s)))
+    }
 }

@@ -19,6 +19,9 @@ pub struct Context {
     env: Option<ty::Environment>,
     class_name_to_node: Option<HashMap<TypeIdentifier, NodeId>>,
     object_class: Option<NodeId>,
+    int_class: Option<NodeId>,
+    string_class: Option<NodeId>,
+    bool_class: Option<NodeId>,
     subclasses_map: Option<HashMap<NodeId, Vec<NodeId>>>,
 }
 
@@ -31,6 +34,9 @@ impl Default for Context {
             env: Some(Default::default()),
             class_name_to_node: None,
             object_class: None,
+            int_class: None,
+            string_class: None,
+            bool_class: None,
             subclasses_map: None,
         }
     }
@@ -45,6 +51,7 @@ pub struct TypeIdentifier(pub StringId);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Identifier(pub StringId);
 
+#[derive(Debug)]
 pub enum Node {
     Class {
         name: TypeIdentifier,
@@ -158,6 +165,14 @@ impl Context {
         &self.idents[id]
     }
 
+    pub fn get_already_interned(&self, s: &str) -> Option<StringId> {
+        self.already_interned.get(s).cloned()
+    }
+
+    pub fn already_interned(&self, s: &str) -> StringId {
+        self.get_already_interned(s).unwrap()
+    }
+
     pub fn new_node(&mut self, node: Node) -> NodeId {
         let id = self.nodes.alloc(node);
         self.env_mut().alloc(id);
@@ -267,19 +282,43 @@ impl Context {
             .expect("should have called `create_class_name_to_node_map` already")
     }
 
+    pub fn get_int_class(&self) -> NodeId {
+        self.int_class
+            .expect("should have called `create_class_name_to_node_map` already")
+    }
+
+    pub fn get_string_class(&self) -> NodeId {
+        self.string_class
+            .expect("should have called `create_class_name_to_node_map` already")
+    }
+
+    pub fn get_bool_class(&self) -> NodeId {
+        self.bool_class
+            .expect("should have called `create_class_name_to_node_map` already")
+    }
+
     pub fn type_check(&mut self) -> Result<(), failure::Error> {
         self.add_self_hosted_builtins();
+
         self.class_name_to_node = Some(self.create_class_name_to_node_map()?);
         let object = self.intern("Object");
         self.object_class = Some(self.class_by_name(TypeIdentifier(object)));
+        let int = self.intern("Int");
+        self.int_class = Some(self.class_by_name(TypeIdentifier(int)));
+        let string = self.intern("String");
+        self.string_class = Some(self.class_by_name(TypeIdentifier(string)));
+        let bool = self.intern("Bool");
+        self.bool_class = Some(self.class_by_name(TypeIdentifier(bool)));
+
         self.subclasses_map = Some(self.create_subclasses_map()?);
         self.check_inheritance()?;
 
         let mut env = self.env.take().unwrap();
         env.check_signatures(self)?;
-
-        unimplemented!("TODO FITZGEN: finish type checking");
+        env.check_bodies(self)?;
         self.env = Some(env);
+        // TODO: check for Main::main
+        Ok(())
     }
 
     fn add_self_hosted_builtins(&mut self) {
